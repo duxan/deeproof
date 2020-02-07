@@ -199,10 +199,10 @@ if __name__ == "__main__":
     # augment the data
     # rotates the image and replaces azimuth values with labels 
     imagefolder = "train"
-    data_augmentation(inputfolder + "/train", outfolder + "/train", rotation=30)
+    data_augmentation(inputfolder + "/train", outfolder + "/train", rotation=360)
     
     imagefolder = "val"
-    data_augmentation(inputfolder + "/val", outfolder + "/val", rotation=30)
+    data_augmentation(inputfolder + "/val", outfolder + "/val", rotation=360)
     
     imagefolder = "test"
-    data_augmentation(inputfolder + "/test", outfolder + "/test", rotation=30)
+    data_augmentation(inputfolder + "/test", outfolder + "/test", rotation=360)

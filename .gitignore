@@ -266,3 +266,4 @@ images/
 .idea/
 logs/
 credentials
+*.png

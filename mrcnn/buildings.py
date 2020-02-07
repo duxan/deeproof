@@ -69,21 +69,23 @@ class BuildingConfig(Config):
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 2
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 16 + 2 + 1  # 
+    NUM_CLASSES = 1 + 16 + 2 + 1
 
     # Number of training steps per epoch
-    STEPS_PER_EPOCH = 500
+    STEPS_PER_EPOCH = 100
 
     # Skip detections with < 90% confidence
-    DETECTION_MIN_CONFIDENCE = 0.9
+    DETECTION_MIN_CONFIDENCE = 0.7
 
     IMAGE_MIN_DIM = 512
     IMAGE_MAX_DIM = 512
-    TRAIN_ROIS_PER_IMAGE = 100
+    TRAIN_ROIS_PER_IMAGE = 200
     IMAGE_PADDING = True
+
+    LEARNING_RATE = 0.0001
 
 ############################################################
 #  Dataset
@@ -166,8 +168,8 @@ class BuildingDataset(utils.Dataset):
         # If not a building dataset image, delegate to parent class.
         image_info = self.image_info[image_id]
 
-        if image_info["source"] != "building":
-            return super(self.__class__, self).load_mask(image_id)
+        #if image_info["source"] != "building":
+        #    return super(self.__class__, self).load_mask(image_id)
 
         # Convert polygons to a bitmap mask of shape
         # [height, width, instance_count]
@@ -181,14 +183,11 @@ class BuildingDataset(utils.Dataset):
         for i, p in enumerate(info["polygons"]):
             # Get indexes of pixels inside the polygon and set them to the attribute
             rr, cc = skimage.draw.polygon(p['all_points_y'], p['all_points_x'])
-            # print(p)
             class_name = info['region_attributes'][i]["building"].strip()
-            # mask[:, :, i] = skimage.draw.polygon(p['all_points_y'], p['all_points_x'])
             class_ids[i] = self.class_name_map[class_name]
             mask[rr, cc, i] = 1
 
-        # Return mask, and array of class IDs of each instance. Since we have
-        # one class ID only, we return an array of 1s
+        # Return mask, and array of class IDs of each instance
         return mask, class_ids
 
     def image_reference(self, image_id):
@@ -216,11 +215,7 @@ def train(model):
     # Since we're using a very small dataset, and starting from
     # COCO trained weights, we don't need to train too long. Also,
     # no need to train all layers, just the heads should do it.
-    # print("Training network heads")
-    # model.train(dataset_train, dataset_val,
-    #             learning_rate=config.LEARNING_RATE,
-    #             epochs=30,
-    #             layers='heads')
+
     augmentation = iaa.Sometimes(
         0.5,
         # iaa.Scale((0.5, 1.0)),
@@ -233,27 +228,26 @@ def train(model):
     print("Training network heads")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
-                epochs=4,
-                layers='heads',
-                augmentation=augmentation)
+                epochs=3,
+                layers='heads')
 
     # Training - Stage 2
     # Finetune layers from ResNet stage 4 and up
     print("Fine tune Resnet stage 4 and up")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
-                epochs=10,
-                layers='4+',
-                augmentation=augmentation)
+                epochs=6,
+                layers='4+')#,
+                #augmentation=augmentation)
 
     # Training - Stage 3
     # Fine tune all layers
     print("Fine tune all layers")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE / 10,
-                epochs=16,
-                layers='all',
-                augmentation=augmentation)
+                epochs=10,
+                layers='all')#,
+                #augmentation=augmentation)
 
 
 def color_splash(image, mask):
@@ -286,7 +280,11 @@ def detect_and_color_splash(model, image_path=None, video_path=None):
         # Read image
         image = skimage.io.imread(args.image)
         # Detect objects
-        r = model.detect([image], verbose=1)[0]
+        r = model.detect([image], verbose=1)
+        r = r[0]
+        if len(r["masks"]) == 0:
+            print("No segments detected, exiting without image output")
+            return False
         # Color splash
         splash = color_splash(image, r['masks'])
         # Save output

@@ -302,7 +302,7 @@ class Dataset(object):
         self.class_names = [clean_name(c["name"]) for c in self.class_info]
         self.num_images = len(self.image_info)
         self._image_ids = np.arange(self.num_images)
-        self.class_name_map = dict(zip(self.class_names,self.class_ids))
+        self.class_name_map = dict(zip(self.class_names, self.class_ids))
 
         self.class_from_source_map = {"{}.{}".format(info['source'], info['id']): id
                                       for info, id in zip(self.class_info, self.class_ids)}
