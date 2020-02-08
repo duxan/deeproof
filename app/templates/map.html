@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css?family=Raleway" rel="stylesheet">
+
+    <title>{{ app_title }}</title>
+    <link rel="stylesheet" href="https://developers.google.com//maps/documentation/javascript/demos/demos.css">
+    <style>#map { height: 100%; width: 100%; }</style>
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.5.0/css/all.css" integrity="sha384-B4dIYHKNBt8Bc12p+WXckhzcICo0wtJAoU8YZTY5qE0Id1GSseTk6S+L3BlXeVIU" crossorigin="anonymous">
+
+    <style>
+    heading {
+      font-family: 'Raleway', sans-serif;
+      font-size: 46px;
+    }
+  </style>
+
+</head>
+
+<body class="bg-dark text-light">
+<div class="container">
+
+    <div class="jumbotron bg-dark text-center">
+        <heading >{{ app_title }}</heading>
+    </div>
+
+    <div class="row justify-content-md-center">
+        <div class="col-sm">
+            <form class="text-center">
+                <a href=# id=test><button class='btn btn-default'>RUN INFERENCE</button></a>
+            </form>
+        </div>
+    </div>
+
+    <br/>
+
+    <div class="row">
+        <div class="col-sm">
+            <h4>Choose location</h4>
+            {{map.html}}{{map.js}}
+        </div>
+        <div class="col-sm">
+            <h4>Snapshot</h4>
+            <img src="https://via.placeholder.com/300" id="snap" width="300px">
+        </div>
+        <div class="col-sm">
+            <h4>Segmentation</h4>
+            <img src="https://via.placeholder.com/300" id="score" width="300px">
+        </div>
+    </div>
+
+    <hr/>
+    <div class="row justify-content-md-center">
+        <div class="col-xl">
+            <h2>How it works?</h2>
+            <br/>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-xl">
+            <img src="{{ url_for('static', filename = 'top_single.png') }}" width="100%">
+        </div>
+    </div>
+
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+    <script type=text/javascript>
+        $(function() {
+          $('a#test').bind('click', function() {
+            var c = map.getCenter();
+            $.post('/get_map_coords', {'lat': c.lat, 'lng': c.lng},
+                function(data) {
+                    $("#snap").attr("src", data + "?timestamp=" + new Date().getTime());
+                    console.log("downloaded");
+                    $.get('/score',
+                        function(data) {
+                            $("#score").attr("src", data + "?timestamp=" + new Date().getTime());
+                            console.log("scored");
+                    });
+             });
+            return false;
+          });
+        });
+    </script>
+    <script>
+        $(document).ready(function(){
+            map.setTilt(0);
+        });
+    </script>
+</div>
+</body>
+</html>

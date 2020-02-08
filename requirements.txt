@@ -1,3 +1,5 @@
+flask
+requests
 # NOTE: dont install these libs from pip if on DL AMI in AWS - install deps from notebooks
 
 geojson==2.5.0

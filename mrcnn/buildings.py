@@ -69,7 +69,7 @@ class BuildingConfig(Config):
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 1
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 16 + 2 + 1
@@ -78,14 +78,14 @@ class BuildingConfig(Config):
     STEPS_PER_EPOCH = 100
 
     # Skip detections with < 90% confidence
-    DETECTION_MIN_CONFIDENCE = 0.7
+    DETECTION_MIN_CONFIDENCE = 0.75
 
     IMAGE_MIN_DIM = 512
     IMAGE_MAX_DIM = 512
-    TRAIN_ROIS_PER_IMAGE = 200
+    TRAIN_ROIS_PER_IMAGE = 80
     IMAGE_PADDING = True
 
-    LEARNING_RATE = 0.0001
+    LEARNING_RATE = 0.005
 
 ############################################################
 #  Dataset
@@ -414,9 +414,7 @@ if __name__ == '__main__':
             "mrcnn_class_logits", "mrcnn_bbox_fc",
             "mrcnn_bbox", "mrcnn_mask"])
     else:
-        model.load_weights(weights_path, by_name=True, exclude=[
-            "mrcnn_class_logits", "mrcnn_bbox_fc",
-            "mrcnn_bbox", "mrcnn_mask"])
+        model.load_weights(weights_path, by_name=True)
 
     # Train or evaluate
     if args.command == "train":
