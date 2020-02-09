@@ -61,18 +61,21 @@ DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 
 
 class BuildingConfig(Config):
-    """Configuration for training on the toy  dataset.
+    """Configuration for training on the building dataset.
     Derives from the base Config class and overrides some values.
     """
     # Give the configuration a recognizable name
     NAME = "building"
 
+    # backbone, and we start from imagenet resnet101 weights
+    BACKBONE = "resnet101"
+
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 2
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 16 + 2 + 1
+    NUM_CLASSES = 1 + 8 + 2 + 1
 
     # Number of training steps per epoch
     STEPS_PER_EPOCH = 100
@@ -82,7 +85,7 @@ class BuildingConfig(Config):
 
     IMAGE_MIN_DIM = 512
     IMAGE_MAX_DIM = 512
-    TRAIN_ROIS_PER_IMAGE = 80
+    TRAIN_ROIS_PER_IMAGE = 120
     IMAGE_PADDING = True
 
     LEARNING_RATE = 0.005
@@ -99,36 +102,18 @@ class BuildingDataset(utils.Dataset):
         dataset_dir: Root directory of the dataset.
         subset: Subset to load: train or val
         """
-        # Add classes. We have only one class to add.
-        directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW",
-                      "NNW", "tree"]
+        # Add classes
+        directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
         self.add_class("building", 1, "flat")
         self.add_class("building", 2, "dome")
+        self.add_class("building", 3, "tree")
         for i, cl in enumerate(directions):
-            self.add_class("building", i + 3, cl)
-
-        # self.add_class("building", 2, "N")
-        # self.add_class("building", 2, "NNW")
-        # self.add_class("building", 3, "SSW")
+            self.add_class("building", i + 4, cl)
 
         # Train or validation dataset?
         assert subset in ["train", "val", "test"]
         dataset_dir = os.path.join(dataset_dir, subset)
 
-        # Load annotations
-        # VGG Image Annotator saves each image in the form:
-        # { 'filename': '28503151_5b5b7ec140_b.jpg',
-        #   'regions': {
-        #       '0': {
-        #           'region_attributes': {},
-        #           'shape_attributes': {
-        #               'all_points_x': [...],
-        #               'all_points_y': [...],
-        #               'name': 'polygon'}},
-        #       ... more regions ...
-        #   },
-        #   'size': 100202
-        # }
         # We mostly care about the x and y coordinates of each region
         annotations = json.load(open(os.path.join(dataset_dir, "via_region_data.json")))
         annotations = list(annotations.values())  # don't need the dict keys
@@ -165,11 +150,7 @@ class BuildingDataset(utils.Dataset):
             one mask per instance.
         class_ids: a 1D array of class IDs of the instance masks.
         """
-        # If not a building dataset image, delegate to parent class.
         image_info = self.image_info[image_id]
-
-        #if image_info["source"] != "building":
-        #    return super(self.__class__, self).load_mask(image_id)
 
         # Convert polygons to a bitmap mask of shape
         # [height, width, instance_count]
@@ -211,43 +192,39 @@ def train(model):
     dataset_val.load_building(args.dataset, "val")
     dataset_val.prepare()
 
-    # *** This training schedule is an example. Update to your needs ***
-    # Since we're using a very small dataset, and starting from
-    # COCO trained weights, we don't need to train too long. Also,
-    # no need to train all layers, just the heads should do it.
-
     augmentation = iaa.Sometimes(
-        0.5,
-        # iaa.Scale((0.5, 1.0)),
+        0.25,
+        iaa.Scale((0.8, 1.0)),
         iaa.CropAndPad(percent=(-0.25, 0.25)),
         iaa.GaussianBlur(sigma=(0.0, 2.0))
-        # iaa.Noop()
     )
-    # augmentation = iaa.CropAndPad(percent=(-0.25, 0.25))
 
+    # Training - Stage 1
+    # Heads only
     print("Training network heads")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
                 epochs=3,
-                layers='heads')
+                layers='heads',
+                augmentation=augmentation)
 
     # Training - Stage 2
     # Finetune layers from ResNet stage 4 and up
     print("Fine tune Resnet stage 4 and up")
     model.train(dataset_train, dataset_val,
-                learning_rate=config.LEARNING_RATE,
+                learning_rate=config.LEARNING_RATE / 10,
                 epochs=6,
-                layers='4+')#,
-                #augmentation=augmentation)
+                layers='4+',
+                augmentation=augmentation)
 
     # Training - Stage 3
     # Fine tune all layers
     print("Fine tune all layers")
     model.train(dataset_train, dataset_val,
-                learning_rate=config.LEARNING_RATE / 10,
+                learning_rate=config.LEARNING_RATE / 50,
                 epochs=10,
-                layers='all')#,
-                #augmentation=augmentation)
+                layers='all',
+                augmentation=augmentation)
 
 
 def color_splash(image, mask):
