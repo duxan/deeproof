@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 
 api = Api()
 
-input_file = "../data/sunroof_cities.csv"
+input_file = "../deeproof_data/sunroof_cities.csv"
 df = pd.read_csv(input_file)
 
 

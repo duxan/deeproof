@@ -1,12 +1,21 @@
 import json
 import os
 import random
+
+import imageio
 import numpy as np
 import imutils
 import copy
 import colorsys
 import cv2
 import math
+
+import imgaug
+from imgaug import augmenters as iaa, SegmentationMapsOnImage
+
+from mrcnn import visualize
+from mrcnn.buildings import BuildingDataset
+from mrcnn.utils import extract_bboxes
 
 
 def rotate(origin, point, angle):
@@ -188,7 +197,6 @@ def data_augmentation(infolder, outfolder, rotation=30):
                 cv2.imwrite(outfolder + "/" + mod_filename, rotated)
 
         files = [f for f in os.listdir(outfolder) if ".jpg" in f]
-        flat_files = [f for f in files if "FLAT" in f]
 
         print("Number of augmented files: ", len(files))
 
@@ -210,17 +218,149 @@ def random_colors(N, bright=True):
     return colors
 
 
+def imgaug_augmentation(infolder, outfolder, imagefolder, aug_name, seq, write_originals=False):
+    if not os.path.exists(os.path.join(outfolder, imagefolder)):
+        os.makedirs(os.path.join(outfolder, imagefolder, "images"))
+        os.makedirs(os.path.join(outfolder, imagefolder, "masks"))
+
+    dataset = BuildingDataset()
+    dataset.load_building_json_masks(infolder, imagefolder)
+    dataset.prepare()
+
+    print(f"Dataset {imagefolder.upper()} contains {dataset.num_classes} classes in {dataset.num_images} images")
+    images = [dataset.load_image(img_id) for img_id in dataset.image_ids]
+    image_names = [dataset.source_image_link(img_id).split("/")[-1] for img_id in dataset.image_ids]
+    mask_class_ids = [dataset.load_mask_from_polygons(img_id) for img_id in dataset.image_ids]
+    class_ids = [mask_id[1] for mask_id in mask_class_ids]  # store for saving masks later
+    class_names_map = dataset.class_name_map
+    segmaps = [SegmentationMapsOnImage(mask_id[0], shape=(512, 512)) for mask_id in mask_class_ids]
+
+    if write_originals:
+        print("Writing original images and masks [can take awhile] ...")
+        for n in image_names:
+            os.makedirs(os.path.join(outfolder, imagefolder, "masks", n), exist_ok=True)
+
+        for img_name, img, classes, segs in zip(image_names, images, class_ids, segmaps):
+            imageio.imwrite(os.path.join(outfolder, imagefolder, "images", img_name), img)
+            for i, cls in enumerate(classes):
+                cls = {v: k for k, v in class_names_map.items()}[cls]
+                imageio.imwrite(os.path.join(outfolder, imagefolder, "masks",
+                                             img_name, f"segment-{i}_class-{cls}.jpg"), segs.draw()[i])
+
+    print(f"Augmenting images: {aug_name.upper()} [can take awhile] ...")
+    for n in image_names:
+        n = n + "_" + aug_name + ".jpg"
+        os.makedirs(os.path.join(outfolder, imagefolder, "masks", n), exist_ok=True)
+
+    imgs_aug, segmaps_aug = seq(images=images, segmentation_maps=segmaps)
+    for img_name, img, classes, segs in zip(image_names, imgs_aug, class_ids, segmaps_aug):
+        img_name = img_name + "_" + aug_name + ".jpg"
+        imageio.imwrite(os.path.join(outfolder, imagefolder, "images", img_name), img)
+        for i, cls in enumerate(classes):
+            cls = {v: k for k, v in class_names_map.items()}[cls]
+            imageio.imwrite(os.path.join(outfolder, imagefolder, "masks", img_name,
+                                         f"segment-{i}_class-{cls}.jpg"), segs.draw()[i])
+
+    # visualize_imgaug(images[0], segmaps[0], imgs_aug[0], segmaps_aug[0])
+
+
+def visualize_imgaug(img, segmap, img_aug, segmap_aug, segment_idx=None):
+    img_with_seg = segmap.draw_on_image(img)
+    if not segment_idx:
+        segment_idx = random.randint(0, len(img_with_seg))
+
+    cells = [img, img_with_seg[segment_idx], img_aug, segmap_aug.draw_on_image(img_aug)[segment_idx]]
+    imgaug.show_grid(cells, cols=2)
+
+
 if __name__ == "__main__":
-    inputfolder = "./data/deeproof/"
-    outfolder = "./images/deeproof/"
+    # inputfolder = "./data/deeproof/"
+    # outfolder = "./images/deeproof/"
 
     # augment the data
+    # OLD code - from angles to classes, saves Via annotaion file per folder + does only rotation
     # rotates the image and replaces azimuth values with labels 
+    # imagefolder = "train"
+    # data_augmentation(inputfolder + "/train", outfolder + "/train", rotation=360)
+
+    # imagefolder = "val"
+    # data_augmentation(inputfolder + "/val", outfolder + "/val", rotation=360)
+
+    # imagefolder = "test"
+    # data_augmentation(inputfolder + "/test", outfolder + "/test", rotation=360)
+
+    # example complex augmentation
+    seq = iaa.Sequential([
+        iaa.Dropout([0.0, 0.02]),  # drop 5% or 20% of all pixels
+        iaa.Sharpen((0.0, 0.1)),  # sharpen the image
+        iaa.Affine(rotate=(-45, 45)),  # rotate by -45 to 45 degrees (affects segmaps)
+        iaa.CropAndPad(percent=(-0.25, 0.25)),
+        iaa.GaussianBlur(sigma=(0.0, 1.5)),
+        iaa.ElasticTransformation(alpha=991, sigma=8)  # apply water effect (affects segmaps)
+    ], random_order=True)
+
+    inputfolder = "./images/deeproof/"  # via annotations, class names not angles, 8 directions
+    outfolder = "./images/deeproof-aug/"  # masks as files, aug with imgaug
+
+    # TRAIN
     imagefolder = "train"
-    data_augmentation(inputfolder + "/train", outfolder + "/train", rotation=360)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Affine(rotate=(-45, 45)),
+                        aug_name="rotate", write_originals=True)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.CropAndPad(percent=(-0.25, 0.25)),
+                        aug_name="crop", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Sharpen((0.1, 0.5)),
+                        aug_name="sharpen", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.GaussianBlur(sigma=(0.1, 2.0)),
+                        aug_name="blur", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.ElasticTransformation(alpha=17, sigma=8),
+                        aug_name="water", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Dropout([0.05, 0.2]),
+                        aug_name="dropout", write_originals=False)
+    num_images = len([name for name in os.listdir(os.path.join(outfolder, imagefolder, "images"))])
+    num_masks = len([name for name in os.listdir(os.path.join(outfolder, imagefolder, "masks"))
+                     if os.path.isfile(os.path.join(os.path.join(outfolder, imagefolder, "masks"), name))])
 
+    print(f"Total number of images in {imagefolder} is {num_images}")
+    print(f"Total number of masks in {imagefolder} is {num_images}")
+
+    # VAL
     imagefolder = "val"
-    data_augmentation(inputfolder + "/val", outfolder + "/val", rotation=360)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Affine(rotate=(-45, 45)),
+                        aug_name="rotate", write_originals=True)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.CropAndPad(percent=(-0.25, 0.25)),
+                        aug_name="crop", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Sharpen((0.1, 0.5)),
+                        aug_name="sharpen", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.GaussianBlur(sigma=(0.1, 2.0)),
+                        aug_name="blur", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.ElasticTransformation(alpha=17, sigma=8),
+                        aug_name="water", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Dropout([0.05, 0.2]),
+                        aug_name="dropout", write_originals=False)
+    num_images = len([name for name in os.listdir(os.path.join(outfolder, imagefolder, "images"))])
+    num_masks = len([name for name in os.listdir(os.path.join(outfolder, imagefolder, "masks"))
+                     if os.path.isfile(os.path.join(os.path.join(outfolder, imagefolder, "masks"), name))])
 
+    print(f"Total number of images in {imagefolder} is {num_images}")
+    print(f"Total number of masks in {imagefolder} is {num_images}")
+
+    # TEST
     imagefolder = "test"
-    data_augmentation(inputfolder + "/test", outfolder + "/test", rotation=360)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Affine(rotate=(-45, 45)),
+                        aug_name="rotate", write_originals=True)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.CropAndPad(percent=(-0.25, 0.25)),
+                        aug_name="crop", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Sharpen((0.1, 0.5)),
+                        aug_name="sharpen", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.GaussianBlur(sigma=(0.1, 2.0)),
+                        aug_name="blur", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.ElasticTransformation(alpha=17, sigma=8),
+                        aug_name="water", write_originals=False)
+    imgaug_augmentation(inputfolder, outfolder, imagefolder, seq=iaa.Dropout([0.05, 0.2]),
+                        aug_name="dropout", write_originals=False)
+    num_images = len([name for name in os.listdir(os.path.join(outfolder, imagefolder, "images"))])
+    num_masks = len([name for name in os.listdir(os.path.join(outfolder, imagefolder, "masks"))
+                     if os.path.isfile(os.path.join(os.path.join(outfolder, imagefolder, "masks"), name))])
+
+    print(f"Total number of images in {imagefolder} is {num_images}")
+    print(f"Total number of masks in {imagefolder} is {num_images}")

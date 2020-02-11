@@ -31,6 +31,9 @@ import os
 import sys
 import json
 import datetime
+
+import imageio
+import imgaug
 import numpy as np
 import skimage.draw
 from imgaug import augmenters as iaa
@@ -72,7 +75,7 @@ class BuildingConfig(Config):
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 1
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 8 + 2 + 1
@@ -90,6 +93,7 @@ class BuildingConfig(Config):
 
     LEARNING_RATE = 0.005
 
+
 ############################################################
 #  Dataset
 ############################################################
@@ -98,6 +102,60 @@ class BuildingConfig(Config):
 class BuildingDataset(utils.Dataset):
 
     def load_building(self, dataset_dir, subset):
+        """Load a subset of the Building dataset.
+        dataset_dir: Root directory of the dataset.
+        subset: Subset to load: train or val
+        """
+        # Add classes
+        directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        self.add_class("building", 1, "flat")
+        self.add_class("building", 2, "dome")
+        self.add_class("building", 3, "tree")
+        for i, cl in enumerate(directions):
+            self.add_class("building", i + 4, cl)
+
+        # Train or validation dataset?
+        assert subset in ["train", "val", "test"]
+        dataset_dir = os.path.join(dataset_dir, subset)
+
+        images = [name for name in os.listdir(os.path.join(dataset_dir, "images")) if name.endswith(".jpg")]
+        for img in images:
+            self.add_image(
+                "building",
+                image_id=img,  # use file name as a unique image id
+                path=os.path.join(dataset_dir, "images", img),
+                width=512, height=512)
+
+    def load_mask(self, image_id):
+        """Generate instance masks for an image.
+       Returns:
+        masks: A bool array of shape [height, width, instance count] with
+            one mask per instance.
+        class_ids: a 1D array of class IDs of the instance masks.
+        """
+        info = self.image_info[image_id]
+
+        mask_path = info['path'].replace("images", "masks")
+        mask_files = [name for name in os.listdir(mask_path)
+                      if os.path.isfile(os.path.join(mask_path, name)) and name.endswith(".jpg")]
+        mask_count = len(mask_files)
+
+        mask = np.zeros([info["height"], info["width"], mask_count], dtype=np.uint8)
+        class_ids = np.zeros(mask_count, np.int32)
+
+        for i, p in enumerate(mask_files):
+            mask_img = skimage.io.imread(os.path.join(mask_path, p), as_gray=True)
+            rr, cc = np.nonzero(mask_img)
+            class_name = p.split(".")[0].split("-")[-1]
+            class_ids[i] = self.class_name_map[class_name]
+            mask[rr, cc, i] = 1
+            print_mask = mask[:, :, i]
+            #imgaug.imshow(print_mask)
+
+        # Return mask, and array of class IDs of each instance
+        return mask, class_ids
+
+    def load_building_json_masks(self, dataset_dir, subset):
         """Load a subset of the Building dataset.
         dataset_dir: Root directory of the dataset.
         subset: Subset to load: train or val
@@ -143,15 +201,13 @@ class BuildingDataset(utils.Dataset):
                 width=width, height=height,
                 polygons=polygons, region_attributes=region_attributes)
 
-    def load_mask(self, image_id, with_class=True):
+    def load_mask_from_polygons(self, image_id, with_class=True):
         """Generate instance masks for an image.
        Returns:
         masks: A bool array of shape [height, width, instance count] with
             one mask per instance.
         class_ids: a 1D array of class IDs of the instance masks.
         """
-        image_info = self.image_info[image_id]
-
         # Convert polygons to a bitmap mask of shape
         # [height, width, instance_count]
         info = self.image_info[image_id]
@@ -192,30 +248,21 @@ def train(model):
     dataset_val.load_building(args.dataset, "val")
     dataset_val.prepare()
 
-    augmentation = iaa.Sometimes(
-        0.25,
-        iaa.Scale((0.8, 1.0)),
-        iaa.CropAndPad(percent=(-0.25, 0.25)),
-        iaa.GaussianBlur(sigma=(0.0, 2.0))
-    )
-
     # Training - Stage 1
     # Heads only
     print("Training network heads")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE,
                 epochs=3,
-                layers='heads',
-                augmentation=augmentation)
+                layers='heads')
 
     # Training - Stage 2
-    # Finetune layers from ResNet stage 4 and up
-    print("Fine tune Resnet stage 4 and up")
+    # Finetune layers 4 and up
+    print("Fine tune layers 4 and up")
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE / 10,
                 epochs=6,
-                layers='4+',
-                augmentation=augmentation)
+                layers='4+')
 
     # Training - Stage 3
     # Fine tune all layers
@@ -223,8 +270,7 @@ def train(model):
     model.train(dataset_train, dataset_val,
                 learning_rate=config.LEARNING_RATE / 50,
                 epochs=10,
-                layers='all',
-                augmentation=augmentation)
+                layers='all')
 
 
 def color_splash(image, mask):

@@ -260,8 +260,8 @@ dmypy.json
 
 # custom
 cache/
+deeproof_data/
 data/
-images/
 *.h5
 .idea/
 logs/

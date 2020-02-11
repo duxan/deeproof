@@ -27,6 +27,7 @@ import skimage.draw
 API_ENDPOINT = "https://maps.googleapis.com/maps/api/staticmap"
 STATIC_PARAMS = "maptype=satellite&format=jpg&zoom=20&size=512x512"
 API_KEY = os.getenv('GOOGLE_API_KEY')
+MODEL = "../logs/5/mask_rcnn_building_0010.h5"
 
 
 class InferenceConfig(BuildingConfig):
@@ -37,7 +38,7 @@ class InferenceConfig(BuildingConfig):
 
 config = InferenceConfig()
 model = modellib.MaskRCNN(mode="inference", config=config, model_dir="../logs/")
-model.load_weights("../logs/mask_rcnn_building_0040.h5", by_name=True)
+model.load_weights(MODEL, by_name=True)
 model.keras_model._make_predict_function()
 
 app = Flask(__name__)
@@ -98,8 +99,7 @@ def score():
 
     mask, class_ids, scores = r['masks'], r['class_ids'], r['scores']
     bbox = utils.extract_bboxes(mask)
-    classes = ["BG", "flat", "dome", "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W",
-               "WNW", "NW", "NNW", "tree"]
+    classes = ["BG", "flat", "dome", "tree", "N", "NE", "E", "SE", "S", "SW", "W", "NW"]
     display_instances(image, bbox, mask, class_ids, classes, scores)
 
     return url_for("static", filename='scored.jpg')
